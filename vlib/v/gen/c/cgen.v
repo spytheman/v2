@@ -14,6 +14,7 @@ import v.util.version
 import v.depgraph
 import sync.pool
 import time
+import sync
 
 const (
 	// Note: some of the words in c_reserved, are not reserved in C, but are
@@ -563,8 +564,8 @@ pub fn gen(files []&ast.File, table &ast.Table, pref &pref.Preferences) string {
 		}
 	}
 
-	header = header.replace_once('static char * v_typeof_interface_IError', 'char * v_typeof_interface_IError')
-	os.write_file('out.h', header) or { panic(err) }
+	out_h := header.replace_once('static char * v_typeof_interface_IError', 'char * v_typeof_interface_IError')
+	os.write_file('out.h', out_h) or { panic(err) }
 	// Write generated stuff in `g.out` before and after the `out_fn_start_pos` locations,
 	// like the `int main()` to "out_0.c" and "out_x.c"
 	out0 := out_str[..g.out_fn_start_pos[0]].replace_once('static char * v_typeof_interface_IError',
@@ -596,23 +597,18 @@ pub fn gen(files []&ast.File, table &ast.Table, pref &pref.Preferences) string {
 			panic(err)
 		}
 		prev_fn_pos = fn_pos
-		// os.write_file('/Users/alex/code/v/out_9.c', out.str()) or { panic(err) }
 	}
 	for i in 0 .. nr_cpus {
 		out_files[i].close()
 	}
 	t := time.now()
-	mut builder_tasks := []thread{}
+	mut wg := sync.new_waitgroup()
 	for i in 0 .. nr_cpus {
-		builder_tasks << go build_o(i)
+		wg.add(1)
+		go build_o(i, mut wg)
 	}
-	builder_tasks.wait()
+	wg.wait()
 	println(time.now() - t)
-	/*
-	for i, mut out in g.out_parallel {
-		os.write_file('/Users/alex/code/v/out_${i}.c', out.str()) or { panic(err) }
-	}
-	*/
 	unsafe { b.free() }
 	unsafe { g.free_builders() }
 	return res
@@ -6146,8 +6142,9 @@ fn (mut g Gen) check_noscan(elem_typ ast.Type) string {
 	return ''
 }
 
-fn build_o(ii int) {
+fn build_o(ii int, mut wg sync.WaitGroup) {
 	cmd := 'cc -c -w -o out_${ii}.o out_${ii}.c'
 	res := os.execute(cmd)
+	wg.done()
 	println('cmd: `$cmd` => $res.exit_code')
 }
